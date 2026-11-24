@@ -1,0 +1,67 @@
+{
+  "id": "io.github.sxsxhhi.lrcredlyrics",
+  "name": "LrcRed Lyrics",
+  "versionCode": 5,
+  "versionName": "0.2.2",
+  "author": "LrcRed Lyrics contributors",
+  "description": "Dual-engine synchronized lyrics source: Apple Music TTML (via iTunes ID discovery and AMLL TTML DB mirrors) with lrc.red as fallback. TTML is converted by Lyrico to the user's selected lyric format.",
+  "apiVersion": 5,
+  "minHostApiVersion": 4,
+  "entry": "source.js",
+  "capabilities": [
+    "getLyrics"
+  ],
+  "configFields": [
+    {
+      "key": "notice",
+      "title": "歌词源说明 / About",
+      "type": "markdown",
+      "defaultValue": "**LrcRed Lyrics** 仅提供歌词，不修改歌曲的封面和其他元数据。\n\n歌词来自两条链路，由 Lyrico 根据全局歌词格式设置统一转换（包括 ELRC）：\n\n- **Apple Music TTML**：通过 iTunes 检索 Apple Music ID，再从 AMLL TTML DB 社区镜像获取逐字 TTML。\n- **lrc.red**：结构化匹配与 ISRC 直查，作为兜底。\n\n请填写可联系的邮箱：lrc.red 的 API 条款要求客户端标识中携带可联系邮箱，邮箱会随请求发往 lrc.red，不是登录账号，也无需 Apple Music Token。遵守 [lrc.red API 条款](https://lrc.red/api)。本插件为第三方工具，与 Apple Inc. 无隶属关系。"
+    },
+    {
+      "key": "contact_email",
+      "title": "联系邮箱 / Contact Email",
+      "summary": "用于 lrc.red 备用源的 User-Agent / X-Client-ID。未配置时仅使用 Apple Music 主引擎，不影响官方歌词检索。请勿填写密码或 Token。",
+      "group": "lrc.red 请求",
+      "type": "text",
+      "required": false,
+      "defaultValue": ""
+    },
+    {
+      "key": "match_mode",
+      "title": "歌词匹配模式",
+      "summary": "均衡：准确匹配并允许少量时长证据缺失；严格：需要完整匹配及可靠时长证据。",
+      "group": "歌词质量",
+      "type": "dropdown",
+      "required": true,
+      "defaultValue": "balanced",
+      "options": [
+        {
+          "value": "balanced",
+          "label": "均衡（推荐）"
+        },
+        {
+          "value": "strict",
+          "label": "严格"
+        }
+      ]
+    },
+    {
+      "key": "apple_tier",
+      "title": "启用 Apple Music 主引擎",
+      "summary": "开启后优先检索 Apple Music 官方逐字 TTML；关闭则只用 lrc.red。仅用于排障或规避 iTunes 限流。",
+      "group": "歌词质量",
+      "type": "switch",
+      "defaultValue": "true"
+    },
+    {
+      "key": "search_fallback",
+      "title": "开启模糊搜索兜底",
+      "summary": "结构化匹配没有合格结果时，再使用 lrc.red 的公开搜索接口。",
+      "group": "歌词质量",
+      "type": "switch",
+      "defaultValue": "true"
+    }
+  ],
+  "icon": "icon.png"
+}

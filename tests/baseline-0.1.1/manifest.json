@@ -1,0 +1,59 @@
+{
+  "id": "io.github.sxsxhhi.lrcredlyrics",
+  "name": "LrcRed Lyrics",
+  "versionCode": 2,
+  "versionName": "0.1.1",
+  "author": "LrcRed Lyrics contributors",
+  "description": "Independent lrc.red synchronized lyrics source. TTML is converted by Lyrico to the user's selected lyric format. Attribution: https://lrc.red",
+  "apiVersion": 5,
+  "minHostApiVersion": 4,
+  "entry": "source.js",
+  "capabilities": [
+    "getLyrics"
+  ],
+  "configFields": [
+    {
+      "key": "notice",
+      "title": "歌词源说明 / About",
+      "type": "markdown",
+      "defaultValue": "**LrcRed Lyrics** 仅提供歌词，不修改歌曲的封面和其他元数据。歌词来自 [lrc.red](https://lrc.red)，由 Lyrico 根据全局歌词格式设置转换（包括 ELRC）。\n\n请填写可联系的邮箱；邮箱随请求的客户端标识发送给 lrc.red，不是登录账号，也无需 Apple Music Token。遵守 [lrc.red API 条款](https://lrc.red/api)。"
+    },
+    {
+      "key": "contact_email",
+      "title": "联系邮箱 / Contact Email",
+      "summary": "必填；用于 lrc.red 的 User-Agent / X-Client-ID，发送至服务端。请勿填写密码或 Token。",
+      "group": "lrc.red 请求",
+      "type": "text",
+      "required": true,
+      "defaultValue": ""
+    },
+    {
+      "key": "match_mode",
+      "title": "歌词匹配模式",
+      "summary": "均衡：准确匹配并允许少量时长证据缺失；严格：需要完整匹配及可靠时长证据。",
+      "group": "歌词质量",
+      "type": "dropdown",
+      "required": true,
+      "defaultValue": "balanced",
+      "options": [
+        {
+          "value": "balanced",
+          "label": "均衡（推荐）"
+        },
+        {
+          "value": "strict",
+          "label": "严格"
+        }
+      ]
+    },
+    {
+      "key": "search_fallback",
+      "title": "开启模糊搜索兜底",
+      "summary": "结构化匹配没有合格结果时，再使用 lrc.red 的公开搜索接口。",
+      "group": "歌词质量",
+      "type": "switch",
+      "defaultValue": "true"
+    }
+  ],
+  "icon": "icon.png"
+}
