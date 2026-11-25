@@ -1,8 +1,8 @@
 {
   "id": "io.github.sxsxhhi.lrcredlyrics",
   "name": "LrcRed Lyrics",
-  "versionCode": 8,
-  "versionName": "0.2.5",
+  "versionCode": 9,
+  "versionName": "0.2.6",
   "author": "LrcRed Lyrics contributors",
   "description": "Dual-engine synchronized lyrics source: Apple Music TTML (via iTunes ID discovery and AMLL TTML DB mirrors) with lrc.red as fallback. TTML is converted by Lyrico to the user's selected lyric format.",
   "apiVersion": 5,

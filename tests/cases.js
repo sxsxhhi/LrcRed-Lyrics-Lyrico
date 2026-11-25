@@ -416,8 +416,8 @@ test('F2  manifest 契约（API5 / Host4 / 仅 getLyrics / 版本号）', () => 
   eq(m.apiVersion, 5);
   eq(m.minHostApiVersion, 4);
   eq(m.capabilities, ['getLyrics']);
-  eq(m.versionName, '0.2.5');
-  eq(m.versionCode, 8);
+  eq(m.versionName, '0.2.6');
+  eq(m.versionCode, 9);
   eq(m.entry, 'source.js');
   eq(m.icon, 'icon.png');
   assert(m.configFields.some((f) => f.key === 'apple_tier' && f.type === 'switch'), '缺少 apple_tier');
@@ -839,9 +839,14 @@ test('M4 宽松模式不放宽时长：差 10s -> 拒', () => {
     { title: 'Lemon', artist: '米津玄师', album: '', duration: 266116 });
   eq(r.length, 0);
 });
-test('M5 宽松模式要求双方都有时长', () => {
+test('M5 无时长时简繁艺人变体仍可命中', () => {
   const { r } = runWith(itunesOne('1537460612', 'Lemon', '米津玄師', 256116),
     { title: 'Lemon', artist: '米津玄师', album: '', duration: 0 });
+  eq(r.length, 1);
+});
+test('M5b 无时长且艺人无关 -> 拒', () => {
+  const { r } = runWith(itunesOne('1537460612', 'Lemon', '米津玄師', 256116),
+    { title: 'Lemon', artist: '张三', album: '', duration: 0 });
   eq(r.length, 0);
 });
 test('M6 严格命中优先于宽松', () => {
@@ -907,6 +912,40 @@ test('N7 宽松命中足够强时只搜第一个区', () => {
     { title: 'Lemon', artist: '米津玄师', album: '', duration: 256116 });
   eq(r.length, 1);
   eq(count(s.calls, (u) => isIT(u)), 1);
+});
+
+/* ---------- P. v0.2.6 matching without duration ---------- */
+
+test('P1 简体艺人 + 无时长 -> 命中且只搜一个区', () => {
+  const { s, r } = runWith(itunesOne('1537460612', 'Lemon', '米津玄師', 256116),
+    { title: 'Lemon', artist: '米津玄师', album: '', duration: 0 });
+  eq(r.length, 1);
+  eq(count(s.calls, (u) => isIT(u)), 1);
+});
+test('P2 三字姓名简繁差异（周杰伦/周杰倫）-> 命中', () => {
+  const { r } = runWith(itunesOne('999', '千里之外', '周杰倫', 260000),
+    { title: '千里之外', artist: '周杰伦', album: '', duration: 0 });
+  eq(r.length, 1);
+});
+test('P3 艺人带括号别名 -> 严格命中', () => {
+  const { r } = runWith(itunesOne('1537460612', 'Lemon', '米津玄師', 256116),
+    { title: 'Lemon', artist: '米津玄師 (Kenshi Yonezu)', album: '', duration: 0 });
+  eq(r.length, 1);
+});
+test('P4 整串「标题 艺人」 + 无艺人 + 无时长 -> 命中', () => {
+  const { r } = runWith(itunesOne('1537460612', 'Lemon', '米津玄師', 256116),
+    { title: 'Lemon 米津玄师', artist: '', album: '', duration: 0 });
+  eq(r.length, 1);
+});
+test('P5 无艺人 + 无时长 + 标题不等 -> 拒', () => {
+  const { r } = runWith(itunesOne('1537460612', 'Lemon', '米津玄師', 256116),
+    { title: 'Lemon Tree', artist: '', album: '', duration: 0 });
+  eq(r.length, 0);
+});
+test('P6 拉丁艺人一字之差不算变体 -> 拒', () => {
+  const { r } = runWith(itunesOne('42', 'Hello', 'Adell', 210000),
+    { title: 'Hello', artist: 'Adele', album: '', duration: 0 });
+  eq(r.length, 0);
 });
 
 process.exit(report() ? 0 : 1);

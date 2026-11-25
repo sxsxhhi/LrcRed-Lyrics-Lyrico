@@ -1,5 +1,5 @@
 /*
- * LrcRed Lyrics 0.2.5 — dual-engine getLyrics-only plugin for Lyrico API 5.
+ * LrcRed Lyrics 0.2.6 — dual-engine getLyrics-only plugin for Lyrico API 5.
  *
  * Engine A: Apple Music TTML
  *   Apple Music ID discovery via iTunes Search (storefront order by language),
@@ -15,7 +15,7 @@
  * QuickJS: no require(), fetch(), timers, filesystem, or Node APIs.
  */
 var LR_PLUGIN_TAG = "LrcRedLyrics";
-var LR_VERSION = "0.2.5";
+var LR_VERSION = "0.2.6";
 var LR_BASE = "https://lrc.red";
 var LR_IT_BASE = "https://itunes.apple.com";
 var LR_APP_URL = "https://github.com/sxsxhhi/music-tag-lyrics";
@@ -241,13 +241,26 @@ function lrTitleMatch(a, b) {
   return false;
 }
 function lrArtistSet(value) {
-  var s = lrNorm(value).replace(/\b(?:feat(?:uring)?|ft|with|vs)\.?\s+/g, "/");
+  var s = lrNorm(value);
+  /* Aliases live in brackets: "米津玄師 (Kenshi Yonezu)", "米津玄師 (よねづ)".
+   * Read them as separate names too, otherwise the whole string becomes one
+   * unmatchable token. */
+  var extras = [];
+  s = s.replace(/[（(\[【]([^）)\]】]*)[）)\]】]/g, function (_m, inner) {
+    if (inner && inner.trim()) extras.push(inner);
+    return " / ";
+  });
+  s = s.replace(/\b(?:feat(?:uring)?|ft|with|vs)\.?\s+/g, "/");
   s = s.replace(/\s+[x\u00d7]\s+/g, "/");
   var parts = s.split(/\s+&\s+|\s+and\s+|\s*[,\uff0c\u3001;\uff1b\/|+]\s*/);
   var result = [];
   for (var i = 0; i < parts.length; i++) {
     var p = lrStripAlnum(parts[i]);
     if (p && result.indexOf(p) < 0) result.push(p);
+  }
+  for (var k = 0; k < extras.length; k++) {
+    var e = lrStripAlnum(extras[k]);
+    if (e && result.indexOf(e) < 0) result.push(e);
   }
   return result;
 }
@@ -256,6 +269,49 @@ function lrArtistCompatible(local, remote) {
   if (!a.length || !b.length) return false;
   for (var i = 0; i < a.length; i++) if (b.indexOf(a[i]) >= 0) return true;
   return false;
+}
+/* CJK names routinely differ only by script (米津玄师 / 米津玄師, 周杰伦 /
+ * 周杰倫) or by one character. Treat a single-character difference between
+ * equally long CJK names as the same act; never apply this to Latin names. */
+function lrNameSimilar(x, y) {
+  if (!x || !y) return false;
+  if (x === y) return true;
+  var cjk = /[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]/;
+  if (!cjk.test(x) || !cjk.test(y)) return false;
+  if (x.length !== y.length || x.length < 2) return false;
+  var diff = 0;
+  for (var i = 0; i < x.length; i++) {
+    if (x.charAt(i) !== y.charAt(i)) {
+      diff += 1;
+      if (diff > 1) return false;
+    }
+  }
+  return true;
+}
+function lrArtistSimilar(local, remote) {
+  if (lrArtistCompatible(local, remote)) return true;
+  var a = lrArtistSet(local), b = lrArtistSet(remote);
+  for (var i = 0; i < a.length; i++) {
+    for (var j = 0; j < b.length; j++) {
+      if (lrNameSimilar(a[i], b[j])) return true;
+    }
+  }
+  return false;
+}
+function lrSameTitleExact(a, b) {
+  var x = lrNorm(a).replace(/\s+/g, ""), y = lrNorm(b).replace(/\s+/g, "");
+  return !!x && x === y;
+}
+/* "Lemon 米津玄师" typed into one field: the leading part is the title and the
+ * remainder must look like the candidate artist, otherwise nothing is kept. */
+function lrQueryTitleSplit(localTitle, candTitle, candArtist) {
+  var l = lrNorm(localTitle).replace(/\s+/g, " ").trim();
+  var t = lrNorm(candTitle).replace(/\s+/g, " ").trim();
+  if (!l || !t || l === t) return false;
+  if (l.indexOf(t + " ") !== 0) return false;
+  var rest = l.slice(t.length).trim();
+  if (!rest || rest.length > 60) return false;
+  return lrArtistSimilar(rest, candArtist);
 }
 function lrAlbumCore(text) {
   return lrStripAlnum(text);
@@ -508,7 +564,9 @@ function lrItunesMatch(items, song, relaxed) {
     var t = lrString(it.trackName).trim();
     var a = lrString(it.artistName).trim();
     if (!t || !a || !titleCore) continue;
-    if (!lrTitleMatch(song.title, t)) continue;
+    var localArtist = lrString(song.artist).trim();
+    var splitOk = relaxed && !localArtist && lrQueryTitleSplit(song.title, t, a);
+    if (!lrTitleMatch(song.title, t) && !splitOk) continue;
     /* Same three-state rule as lrc.red: soft tokens (remaster, extended,
      * taylor version) must not reject an otherwise identical track. */
     if (lrAssessVersion(song.title, song.album, t, lrString(it.collectionName)) === "conflict") continue;
@@ -516,10 +574,16 @@ function lrItunesMatch(items, song, relaxed) {
     if (!isFinite(dur) || dur < 0) dur = 0;
     if (relaxed) {
       /* Simplified/traditional names, romanised names and aliases all break a
-       * literal artist comparison. Fall back to title + a tight duration match,
-       * but never without a duration on both sides. */
-      if (!(song.duration > 0 && dur > 0)) continue;
-      if (Math.abs(dur - song.duration) > 2000) continue;
+       * literal artist comparison. Fall back in order of available evidence:
+       * duration first, then a script-variant artist, then an identical title. */
+      var hasDur = song.duration > 0 && dur > 0;
+      if (hasDur) {
+        if (Math.abs(dur - song.duration) > 2000) continue;
+      } else if (localArtist) {
+        if (!lrArtistSimilar(song.artist, a)) continue;
+      } else if (!splitOk && !lrSameTitleExact(song.title, t)) {
+        continue;
+      }
     } else {
       if (!lrArtistCompatible(song.artist, a)) continue;
       if (song.duration > 0 && dur > 0 && Math.abs(dur - song.duration) > 5000) continue;
@@ -578,14 +642,20 @@ function lrFetchAppleTtml(state, appleId, dl) {
 function lrAppleIdentityOk(song, meta, mode, relaxed) {
   if (!meta || !meta.title || !meta.artist) return false;
   if (!song.title) return false;
-  if (!lrTitleMatch(song.title, meta.title)) return false;
+  var splitOk = relaxed && !lrString(song.artist).trim() &&
+    lrQueryTitleSplit(song.title, meta.title, meta.artist);
+  if (!lrTitleMatch(song.title, meta.title) && !splitOk) return false;
   if (!lrArtistCompatible(song.artist, meta.artist) && !relaxed) return false;
   if (lrAssessVersion(song.title, song.album, meta.title, meta.album) === "conflict") return false;
   var dur = Number(meta.duration || 0);
   if (!isFinite(dur) || dur < 0) dur = 0;
   if (relaxed) {
-    if (!(song.duration > 0 && dur > 0)) return false;
-    return Math.abs(song.duration - dur) <= 2000;
+    var hasDur = song.duration > 0 && dur > 0;
+    if (hasDur) return Math.abs(song.duration - dur) <= 2000;
+    var localArtist = lrString(song.artist).trim();
+    if (localArtist) return lrArtistSimilar(song.artist, meta.artist);
+    return lrSameTitleExact(song.title, meta.title) ||
+      lrQueryTitleSplit(song.title, meta.title, meta.artist);
   }
   if (song.duration > 0 && dur > 0 && Math.abs(song.duration - dur) > (mode === "strict" ? 3000 : 5000)) return false;
   return true;
@@ -680,8 +750,11 @@ function lrEngineApple(state, song, mode, dl) {
         if (!relaxedHit) relaxedHit = res.relaxed;
         /* Exact title plus a sub-second duration match is strong enough to stop
          * early; scanning the remaining storefronts would only cost requests. */
-        if (relaxedHit.exact && song.duration > 0 &&
-            Math.abs(relaxedHit.duration - song.duration) <= 500) {
+        if (relaxedHit.exact && (
+              (song.duration > 0 && Math.abs(relaxedHit.duration - song.duration) <= 500) ||
+              (song.duration <= 0 && (lrArtistSimilar(song.artist, relaxedHit.artist) ||
+                !lrString(song.artist).trim()))
+            )) {
           hit = relaxedHit;
           break;
         }

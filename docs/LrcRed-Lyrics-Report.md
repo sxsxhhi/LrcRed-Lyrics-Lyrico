@@ -1,6 +1,6 @@
 # LrcRed Lyrics — 双引擎插件说明与复检记录
 
-**当前版本**：0.2.5（`versionCode: 8`）
+**当前版本**：0.2.6（`versionCode: 9`）
 **插件 ID**：`io.github.sxsxhhi.lrcredlyrics`
 **协议**：Lyrico Plugin API 5，Host API ≥ 4
 **项目规范**：见上级目录 `AGENTS.md`（目录职责、发布流程、硬性约束）
@@ -15,7 +15,8 @@
 | 0.2.2 | 邮箱门禁按引擎解耦；新增 iTunes 检索本地映射缓存；艺人合作符号增强；元数据兜底对齐；测试增至 81 项全绿 |
 | 0.2.3 | 真机日志定位到 Apple 引擎从未命中：新增宽松兜底（标题+时长±2s，不要求艺人）、空艺人支持、标题拆分；测试增至 90 项全绿 |
 | 0.2.4 | 标题变体匹配（中译/日文括注、`- Single` 后缀）、空艺人不发空参数；测试 96 项 |
-| **0.2.5** | 宽松命中强证据（标题完全相等且时长差 ≤0.5s）时只搜第一个店面，请求数 7→4；测试 97 项全绿 |
+| 0.2.5 | 宽松命中强证据（标题完全相等且时长差 ≤0.5s）时只搜第一个店面，请求数 7→4；测试 97 项全绿 |
+| **0.2.6** | 修复「原文能搜到、改成简体搜不到」：无时长时不再一刀切拒绝，改按「时长 → 简繁艺人变体 → 完全同名」三级证据判定；新增 CJK 姓名单字差异与括号别名识别；测试 104 项全绿 |
 
 ---
 
@@ -27,7 +28,7 @@ Lyrico/
 ├── LrcRed-Lyrics-0.2.2-Lyrico-Plugin.zip       发布产物
 └── LrcRed-Lyrics/                              工作目录
     ├── src/            manifest.json / source.js / icon.png
-    ├── tests/          harness.js / fixtures.js / cases.js（97 项）
+    ├── tests/          harness.js / fixtures.js / cases.js（104 项）
     │   └── baseline-0.1.1/   0.1.1 只读快照，供 A9/A10 缺陷复现
     ├── docs/           本报告 + archive/0.1.1-report.md
     ├── dist/           构建中间产物
@@ -207,13 +208,13 @@ switch 传布尔 `false` 时引擎 A 关不掉（`lrBool`）· `match_mode` 大�
 
 ---
 
-## 9. 产物哈希（0.2.5）
+## 9. 产物哈希（0.2.6）
 
 | 文件 | 大小 | SHA-256 |
 |---|---|---|
-| `LrcRed-Lyrics-0.2.5-Lyrico-Plugin.zip` | 26,656 B | `d5a276a1e10480010f03901e902798aab2bffc14be6461179910699a161e446f` |
-| `manifest.json` | 2,819 B | `e4750b1c6e0bc6b9057819a767d8389fa37b29f7ce17de2e090e39180762b1f6` |
-| `source.js` | 42,347 B | `68fbdb201a91974932533f3cee99460e93afce79610f635f22b90e777707fd18` |
+| `LrcRed-Lyrics-0.2.6-Lyrico-Plugin.zip` | 27,565 B | `db1be65cf07d04b8d8ac84da56ca2854b1a392771b7980312adaf5a479576511` |
+| `manifest.json` | 2,819 B | `19f7b968738f83c1493d0dabbba084ca79d02f5bd177aa6eb9707efbb1e1dfc6` |
+| `source.js` | 45,446 B | `2cc31742087409d22b90e07f08285907328ab573e92622ada601c90a170d634d` |
 | `icon.png` | 13,185 B | `3e96a13676f86c1df819fe77344ebc21c8119e4fc00920b8988c53a6855f23b4`（与 0.1.1 逐字节相同） |
 
 构建：`python build.py`；发布：`python build.py --publish`。
