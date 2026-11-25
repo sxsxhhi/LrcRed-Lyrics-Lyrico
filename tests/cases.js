@@ -416,8 +416,8 @@ test('F2  manifest 契约（API5 / Host4 / 仅 getLyrics / 版本号）', () => 
   eq(m.apiVersion, 5);
   eq(m.minHostApiVersion, 4);
   eq(m.capabilities, ['getLyrics']);
-  eq(m.versionName, '0.2.2');
-  eq(m.versionCode, 5);
+  eq(m.versionName, '0.2.5');
+  eq(m.versionCode, 8);
   eq(m.entry, 'source.js');
   eq(m.icon, 'icon.png');
   assert(m.configFields.some((f) => f.key === 'apple_tier' && f.type === 'switch'), '缺少 apple_tier');
@@ -799,6 +799,114 @@ test('L9  本地无时长时 lrc.red 用远端时长兜住预览截断', () => {
   });
   const res = s.ctx.getLyrics(F.req({ isrc: 'USRC17607839', duration: 0 }, { apple_tier: 'false' }));
   eq(res.length, 0);
+});
+
+/* ---------- M. v0.2.3 relaxed matching ---------- */
+
+function itunesOne(id, title, artist, dur) {
+  return F.itunesBody([F.itTrack({ id: id, title: title, artist: artist, dur: dur })]);
+}
+function runWith(itBody, song) {
+  const s = createSandbox({
+    http: (url) => {
+      if (url.indexOf('https://itunes.apple.com/search') === 0) return { code: 200, body: itBody };
+      if (url.indexOf('/am-lyrics/') > 0) return { code: 200, body: F.buildTtml() };
+      return { code: 404, body: '' };
+    }
+  });
+  return { s, r: s.ctx.getLyrics(F.req(song)) };
+}
+
+test('M1 简繁艺人差异 -> 宽松兜底命中', () => {
+  const { r } = runWith(itunesOne('1537460612', 'Lemon', '米津玄師', 256116),
+    { title: 'Lemon', artist: '米津玄师', album: '', duration: 256116 });
+  eq(r.length, 1);
+  eq(r[0].tags.source, 'Apple Music');
+});
+test('M2 艺人缺失 -> 仍可命中', () => {
+  const { r } = runWith(itunesOne('1537460612', 'Lemon', '米津玄師', 256116),
+    { title: 'Lemon', artist: '', album: '', duration: 256116 });
+  eq(r.length, 1);
+});
+test('M3 标题含「- 艺人」且艺人空 -> 自动拆分', () => {
+  const { s, r } = runWith(itunesOne('1537460612', 'Lemon', '米津玄師', 256116),
+    { title: 'Lemon - 米津玄师', artist: '', album: '', duration: 256116 });
+  eq(s.ctx.lrSongContext({ song: { title: 'Lemon - 米津玄师' } }).artist, '米津玄师');
+  eq(r.length, 1);
+});
+test('M4 宽松模式不放宽时长：差 10s -> 拒', () => {
+  const { r } = runWith(itunesOne('1537460612', 'Lemon', '米津玄師', 256116),
+    { title: 'Lemon', artist: '米津玄师', album: '', duration: 266116 });
+  eq(r.length, 0);
+});
+test('M5 宽松模式要求双方都有时长', () => {
+  const { r } = runWith(itunesOne('1537460612', 'Lemon', '米津玄師', 256116),
+    { title: 'Lemon', artist: '米津玄师', album: '', duration: 0 });
+  eq(r.length, 0);
+});
+test('M6 严格命中优先于宽松', () => {
+  const body = F.itunesBody([
+    F.itTrack({ id: '111', title: 'Test Song', artist: 'Someone Else', dur: 210000 }),
+    F.itTrack({ id: '222', title: 'Test Song', artist: 'Test Artist', dur: 210000 })
+  ]);
+  const { s, r } = runWith(body, { title: 'Test Song', artist: 'Test Artist', album: '', duration: 210000 });
+  eq(r.length, 1);
+  assert(s.calls.some((c) => c.url.indexOf('/am-lyrics/222.ttml') > 0), '应选严格匹配的那条');
+});
+test('M7 宽松候选的艺人取 iTunes 值', () => {
+  const { r } = runWith(itunesOne('1537460612', 'Lemon', '米津玄師', 256116),
+    { title: 'Lemon', artist: '米津玄师', album: '', duration: 256116 });
+  eq(r[0].tags.ar, '米津玄師');
+});
+test('M8 有艺人时不拆分标题', () => {
+  const s = createSandbox();
+  eq(s.ctx.lrSongContext({ song: { title: 'Lemon - 米津玄师', artist: '米津玄师' } }).title, 'Lemon - 米津玄师');
+});
+
+/* ---------- N. v0.2.3 title variants ---------- */
+
+test('N1 标题带中译括注 -> 命中', () => {
+  const { r } = runWith(itunesOne('9001', 'Lemon Tree', "Fool's Garden", 210000),
+    { title: 'Lemon Tree(柠檬树)', artist: "Fool's Garden", album: '', duration: 210000 });
+  eq(r.length, 1);
+});
+test('N2 标题带「- Single」后缀 -> 命中', () => {
+  const { r } = runWith(itunesOne('9002', 'Lemon', '米津玄師', 256116),
+    { title: 'Lemon - Single', artist: '米津玄師', album: '', duration: 256116 });
+  eq(r.length, 1);
+});
+test('N3 标题带日文括注 -> 命中', () => {
+  const { r } = runWith(itunesOne('9003', 'Lemon', '米津玄師', 256116),
+    { title: 'Lemon(ドラマ「アンナチュラル」主題歌)', artist: '米津玄師', album: '', duration: 256116 });
+  eq(r.length, 1);
+});
+test('N4 括号里的 Acoustic 仍被版本门拦下', () => {
+  const { r } = runWith(itunesOne('9004', 'Lemon', '米津玄師', 256116),
+    { title: 'Lemon (Acoustic)', artist: '米津玄師', album: '', duration: 256116 });
+  eq(r.length, 0);
+});
+test('N5 不同歌名不因变体而误配', () => {
+  const s = createSandbox();
+  eq(s.ctx.lrTitleMatch('Lemon Tree', 'Lemon'), false);
+});
+test('N6 空艺人时 lrc.red 请求不带空 artist 参数', () => {
+  const s = createSandbox({
+    http: (url) => {
+      if (isSongDoc(url)) return { code: 200, body: F.lrcSongBody(F.buildTtml()) };
+      if (isMatch(url)) return { code: 200, body: F.lrcHitsBody([F.hit('USRC17607839')]) };
+      return { code: 404, body: '' };
+    }
+  });
+  s.ctx.getLyrics(F.req({ artist: '' }, { apple_tier: 'false', search_fallback: 'false' }));
+  const m = s.calls.filter((c) => isMatch(c.url)).map((c) => c.url)[0] || '';
+  assert(m.indexOf('artist=') < 0, '不应携带 artist 参数: ' + m);
+});
+
+test('N7 宽松命中足够强时只搜第一个区', () => {
+  const { s, r } = runWith(itunesOne('1537460612', 'Lemon', '米津玄師', 256116),
+    { title: 'Lemon', artist: '米津玄师', album: '', duration: 256116 });
+  eq(r.length, 1);
+  eq(count(s.calls, (u) => isIT(u)), 1);
 });
 
 process.exit(report() ? 0 : 1);

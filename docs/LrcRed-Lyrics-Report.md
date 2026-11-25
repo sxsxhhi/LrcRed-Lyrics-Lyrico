@@ -1,6 +1,6 @@
 # LrcRed Lyrics — 双引擎插件说明与复检记录
 
-**当前版本**：0.2.2（`versionCode: 5`）
+**当前版本**：0.2.5（`versionCode: 8`）
 **插件 ID**：`io.github.sxsxhhi.lrcredlyrics`
 **协议**：Lyrico Plugin API 5，Host API ≥ 4
 **项目规范**：见上级目录 `AGENTS.md`（目录职责、发布流程、硬性约束）
@@ -12,7 +12,10 @@
 | 0.1.1 | 仅 lrc.red 单引擎；版本判据为"任一标签不对称即冲突"，会误杀 Remaster；候选必须四字段齐全 |
 | 0.2.0 | 合并 Apple Music 主引擎；版本三态 + 黑名单；`al`/`date` 放开；预算 18s；经 6 轮复检修掉 21 项缺陷 |
 | 0.2.1 | iTunes 429 冷却改为 30/60/120/300s 分级；目录归并为单工作目录；构建脚本改为版本驱动 + `--publish` |
-| **0.2.2** | 邮箱门禁按引擎解耦；新增 iTunes 检索本地映射缓存；艺人合作符号增强；元数据兜底对齐；测试增至 81 项全绿 |
+| 0.2.2 | 邮箱门禁按引擎解耦；新增 iTunes 检索本地映射缓存；艺人合作符号增强；元数据兜底对齐；测试增至 81 项全绿 |
+| 0.2.3 | 真机日志定位到 Apple 引擎从未命中：新增宽松兜底（标题+时长±2s，不要求艺人）、空艺人支持、标题拆分；测试增至 90 项全绿 |
+| 0.2.4 | 标题变体匹配（中译/日文括注、`- Single` 后缀）、空艺人不发空参数；测试 96 项 |
+| **0.2.5** | 宽松命中强证据（标题完全相等且时长差 ≤0.5s）时只搜第一个店面，请求数 7→4；测试 97 项全绿 |
 
 ---
 
@@ -24,7 +27,7 @@ Lyrico/
 ├── LrcRed-Lyrics-0.2.2-Lyrico-Plugin.zip       发布产物
 └── LrcRed-Lyrics/                              工作目录
     ├── src/            manifest.json / source.js / icon.png
-    ├── tests/          harness.js / fixtures.js / cases.js（73 项）
+    ├── tests/          harness.js / fixtures.js / cases.js（97 项）
     │   └── baseline-0.1.1/   0.1.1 只读快照，供 A9/A10 缺陷复现
     ├── docs/           本报告 + archive/0.1.1-report.md
     ├── dist/           构建中间产物
@@ -124,7 +127,9 @@ SOFT（不拒）：remaster / extended / radio_edit / taylor_version / deluxe / 
 | I 二~四轮修复 | 冷却自过期、12h 过期、低预算、畸形 probe 等 | 10 |
 | J 五轮修复 | 同源去重、艺人斜杠切分 | 2 |
 | K 六轮验证 | 全译文行、命名空间幂等、缺开关默认值 | 3 |
-| **T 分级冷却** | 30/60/120/300s、衰减回落、`Retry-After`、lrc.red 不回归 | **6** |
+| T 分级冷却 | 30/60/120/300s、衰减回落、`Retry-After`、lrc.red 不回归 | 6 |
+| M 宽松匹配 | 简繁艺人、空艺人、标题拆分、时长越界、严格优先、艺人取值 | 8 |
+| **N 标题变体** | 中译括注、日文括注、`- Single`、Acoustic 仍拒、不误配、空参数、提前接受 | **7** |
 | **L 架构与健壮性** | 邮箱解耦、iTunes 映射缓存（0 请求秒出）、艺人多分隔符、元数据兜底、lrc.red 无时长兜底 | **9** |
 
 基线对照：A9/A10 用 `tests/baseline-0.1.1/source.js` 断言 0.1.1 的两个缺陷成立。
@@ -202,13 +207,13 @@ switch 传布尔 `false` 时引擎 A 关不掉（`lrBool`）· `match_mode` 大�
 
 ---
 
-## 9. 产物哈希（0.2.2）
+## 9. 产物哈希（0.2.5）
 
 | 文件 | 大小 | SHA-256 |
 |---|---|---|
-| `LrcRed-Lyrics-0.2.2-Lyrico-Plugin.zip` | 25,627 B | `2f40561e7b9e1b35f37a04e8686576717b89b7e41d26e743428dfcee9a29defd` |
-| `manifest.json` | 2,819 B | `c8b876d25666f82086e9d5a50cb05ee4632f374ea40390463240ef80f7335fad` |
-| `source.js` | 39,149 B | `00004d690454abb582b2848c722d2fc233d9b228364934c9a406bd731c88b8b0` |
+| `LrcRed-Lyrics-0.2.5-Lyrico-Plugin.zip` | 26,656 B | `d5a276a1e10480010f03901e902798aab2bffc14be6461179910699a161e446f` |
+| `manifest.json` | 2,819 B | `e4750b1c6e0bc6b9057819a767d8389fa37b29f7ce17de2e090e39180762b1f6` |
+| `source.js` | 42,347 B | `68fbdb201a91974932533f3cee99460e93afce79610f635f22b90e777707fd18` |
 | `icon.png` | 13,185 B | `3e96a13676f86c1df819fe77344ebc21c8119e4fc00920b8988c53a6855f23b4`（与 0.1.1 逐字节相同） |
 
 构建：`python build.py`；发布：`python build.py --publish`。

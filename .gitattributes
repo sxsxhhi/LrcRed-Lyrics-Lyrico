@@ -1,0 +1,6 @@
+# Keep repository bytes identical on every platform so a rebuild of the
+# release package produces the same SHA-256 as the published asset.
+* text=auto eol=lf
+
+*.png binary
+*.zip binary

@@ -1,5 +1,5 @@
 /*
- * LrcRed Lyrics 0.2.2 — dual-engine getLyrics-only plugin for Lyrico API 5.
+ * LrcRed Lyrics 0.2.5 — dual-engine getLyrics-only plugin for Lyrico API 5.
  *
  * Engine A: Apple Music TTML
  *   Apple Music ID discovery via iTunes Search (storefront order by language),
@@ -15,7 +15,7 @@
  * QuickJS: no require(), fetch(), timers, filesystem, or Node APIs.
  */
 var LR_PLUGIN_TAG = "LrcRedLyrics";
-var LR_VERSION = "0.2.2";
+var LR_VERSION = "0.2.5";
 var LR_BASE = "https://lrc.red";
 var LR_IT_BASE = "https://itunes.apple.com";
 var LR_APP_URL = "https://github.com/sxsxhhi/music-tag-lyrics";
@@ -210,11 +210,35 @@ function lrAssessVersion(localTitle, localAlbum, candTitle, candAlbum) {
   if (lrString(localAlbum).trim() && !lrString(candAlbum).trim()) return "unknown";
   return "consistent";
 }
+var LR_RE_FEAT = /\b(?:feat(?:uring)?|ft)\.?\s+[^()\[\]\uff0c,]+/g;
+var LR_RE_VER_BRACKET = /[（(\[【][^）)\]】]*(?:live|remix|acoustic|instrumental|karaoke|cover|demo|remaster|radio\s+edit|extended|sped.up|slowed|taylor|nightcore|deluxe|mono|explicit|clean|\bver\b|\u73b0\u573a\u7248|\u6df7\u97f3\u7248|\u91cd\u5236\u7248|\u8c6a\u534e\u7248)[^）)\]】]*[）)\]】]/g;
+var LR_RE_ANY_BRACKET = /[（(\[【][^）)\]】]*[）)\]】]/g;
+var LR_RE_SUFFIX = /\s*[-\u2013\u2014]\s*(?:single|ep|album|digital single|bonus track)\b.*$/i;
+
 function lrTitleCore(text) {
   var s = lrNorm(text);
-  s = s.replace(/\b(?:feat(?:uring)?|ft)\.?\s+[^()\[\]\uff0c,]+/g, "");
-  s = s.replace(/[（(\[【][^）)\]】]*(?:live|remix|acoustic|instrumental|karaoke|cover|demo|remaster|radio\s+edit|extended|sped.up|slowed|taylor|nightcore|deluxe|mono|explicit|clean|\bver\b|\u73b0\u573a\u7248|\u6df7\u97f3\u7248|\u91cd\u5236\u7248|\u8c6a\u534e\u7248)[^）)\]】]*[）)\]】]/g, "");
+  s = s.replace(LR_RE_FEAT, "");
+  s = s.replace(LR_RE_VER_BRACKET, "");
   return lrStripAlnum(s);
+}
+/* Phones tag "Title(中文名)" or "Title - Single" all the time. Compare every
+ * plausible reading of the title instead of one, so an annotation on either
+ * side cannot hide an otherwise identical track. */
+function lrTitleVariants(text) {
+  var s = lrNorm(text).replace(LR_RE_FEAT, "").replace(LR_RE_SUFFIX, "");
+  var out = [];
+  function add(v) { var c = lrStripAlnum(v); if (c && out.indexOf(c) < 0) out.push(c); }
+  add(s.replace(LR_RE_VER_BRACKET, ""));
+  add(s.replace(LR_RE_ANY_BRACKET, " "));
+  return out;
+}
+function lrTitleMatch(a, b) {
+  var va = lrTitleVariants(a), vb = lrTitleVariants(b);
+  if (!va.length || !vb.length) return false;
+  for (var i = 0; i < va.length; i++) {
+    if (vb.indexOf(va[i]) >= 0) return true;
+  }
+  return false;
 }
 function lrArtistSet(value) {
   var s = lrNorm(value).replace(/\b(?:feat(?:uring)?|ft|with|vs)\.?\s+/g, "/");
@@ -247,6 +271,16 @@ function lrSongContext(request) {
   var f = song.fields || {};
   var title = lrString(song.title || f.title).trim();
   var artist = lrString(song.artist || f.artist).trim();
+  /* Tags that only carry "Title - Artist" in one field are common on phones.
+   * Split it so the artist gate has something to compare against. */
+  if (!artist && title) {
+    var parts = title.split(/\s+[-\u2013\u2014\uff0d]\s+/);
+    if (parts.length >= 2) {
+      var head = parts[0].trim();
+      var tail = parts.slice(1).join(" - ").trim();
+      if (head && tail && tail.length <= 60) { title = head; artist = tail; }
+    }
+  }
   var album = lrString(song.album || f.album).trim();
   var date = lrString(song.date || f.date).trim();
   var duration = Number(song.duration || song.durationMs || f.duration || 0);
@@ -463,7 +497,7 @@ function lrNormalizeTtml(input) {
 function lrRegions(song) {
   return lrIsForeign(song.title + " " + song.artist) ? LR_REGIONS_FOREIGN : LR_REGIONS_ZH;
 }
-function lrItunesMatch(items, song) {
+function lrItunesMatch(items, song, relaxed) {
   if (!Array.isArray(items)) return null;
   var titleCore = lrTitleCore(song.title);
   var i;
@@ -474,14 +508,22 @@ function lrItunesMatch(items, song) {
     var t = lrString(it.trackName).trim();
     var a = lrString(it.artistName).trim();
     if (!t || !a || !titleCore) continue;
-    if (lrTitleCore(t) !== titleCore) continue;
+    if (!lrTitleMatch(song.title, t)) continue;
     /* Same three-state rule as lrc.red: soft tokens (remaster, extended,
      * taylor version) must not reject an otherwise identical track. */
     if (lrAssessVersion(song.title, song.album, t, lrString(it.collectionName)) === "conflict") continue;
-    if (!lrArtistCompatible(song.artist, a)) continue;
     var dur = Number(it.trackTimeMillis || 0);
     if (!isFinite(dur) || dur < 0) dur = 0;
-    if (song.duration > 0 && dur > 0 && Math.abs(dur - song.duration) > 5000) continue;
+    if (relaxed) {
+      /* Simplified/traditional names, romanised names and aliases all break a
+       * literal artist comparison. Fall back to title + a tight duration match,
+       * but never without a duration on both sides. */
+      if (!(song.duration > 0 && dur > 0)) continue;
+      if (Math.abs(dur - song.duration) > 2000) continue;
+    } else {
+      if (!lrArtistCompatible(song.artist, a)) continue;
+      if (song.duration > 0 && dur > 0 && Math.abs(dur - song.duration) > 5000) continue;
+    }
     return {
       appleId: appleId,
       title: t,
@@ -489,13 +531,15 @@ function lrItunesMatch(items, song) {
       album: lrString(it.collectionName).trim(),
       date: lrString(it.releaseDate).trim(),
       duration: dur,
-      region: ""
+      region: "",
+      relaxed: !!relaxed,
+      exact: lrNorm(t).replace(/\s+/g, "") === lrNorm(song.title).replace(/\s+/g, "")
     };
   }
   return null;
 }
 function lrItunesSearch(state, song, region, dl) {
-  var term = song.title + " " + song.artist;
+  var term = (song.title + " " + song.artist).trim();
   var url = LR_IT_BASE + "/search?term=" + encodeURIComponent(term) +
     "&country=" + region + "&media=music&entity=song&limit=10";
   var data = lrGetJson(state, url, {
@@ -503,9 +547,13 @@ function lrItunesSearch(state, song, region, dl) {
     accept: "application/json", cooldownKey: "cd.it", cdTier: true, tag: "itunes"
   });
   if (!data) return null;
-  var hit = lrItunesMatch(data.results, song);
-  if (hit) hit.region = region;
-  return hit;
+  /* One payload, two passes: strict first, relaxed as a fallback that costs
+   * no extra request. */
+  var strict = lrItunesMatch(data.results, song, false);
+  if (strict) { strict.region = region; return { strict: strict, relaxed: null }; }
+  var loose = lrItunesMatch(data.results, song, true);
+  if (loose) loose.region = region;
+  return { strict: null, relaxed: loose };
 }
 function lrFetchAppleTtml(state, appleId, dl) {
   if (!LR_APPLE_ID_RE.test(lrString(appleId))) return null;
@@ -527,14 +575,18 @@ function lrFetchAppleTtml(state, appleId, dl) {
   }
   return null;
 }
-function lrAppleIdentityOk(song, meta, mode) {
+function lrAppleIdentityOk(song, meta, mode, relaxed) {
   if (!meta || !meta.title || !meta.artist) return false;
-  if (!song.title || !song.artist) return false;
-  if (lrTitleCore(song.title) !== lrTitleCore(meta.title)) return false;
-  if (!lrArtistCompatible(song.artist, meta.artist)) return false;
+  if (!song.title) return false;
+  if (!lrTitleMatch(song.title, meta.title)) return false;
+  if (!lrArtistCompatible(song.artist, meta.artist) && !relaxed) return false;
   if (lrAssessVersion(song.title, song.album, meta.title, meta.album) === "conflict") return false;
   var dur = Number(meta.duration || 0);
   if (!isFinite(dur) || dur < 0) dur = 0;
+  if (relaxed) {
+    if (!(song.duration > 0 && dur > 0)) return false;
+    return Math.abs(song.duration - dur) <= 2000;
+  }
   if (song.duration > 0 && dur > 0 && Math.abs(song.duration - dur) > (mode === "strict" ? 3000 : 5000)) return false;
   return true;
 }
@@ -583,6 +635,7 @@ function lrItunesCacheSet(song, hit) {
     date: lrString(hit.date),
     duration: Number(hit.duration || 0),
     region: lrString(hit.region),
+    relaxed: !!hit.relaxed,
     cachedAt: lrNow()
   };
   var payload = JSON.stringify(record);
@@ -607,10 +660,10 @@ function lrAppleCacheSet(record) {
 function lrEngineApple(state, song, mode, dl) {
   var tStart = lrNow();
   var hit = lrItunesCacheGet(song);
-  if (hit && !lrAppleIdentityOk(song, hit, mode)) {
+  if (hit && !lrAppleIdentityOk(song, hit, mode, hit.relaxed)) {
     hit = null;
   }
-  var i;
+  var i, relaxedHit = null;
 
   if (!hit) {
     var regions = lrRegions(song);
@@ -619,12 +672,26 @@ function lrEngineApple(state, song, mode, dl) {
         lrLog("debug", "[apple] budget stop before region " + regions[i]);
         break;
       }
-      hit = lrItunesSearch(state, song, regions[i], dl);
-      if (hit) {
-        lrItunesCacheSet(song, hit);
-        break;
+      var res = lrItunesSearch(state, song, regions[i], dl);
+      if (!res) continue;
+      /* A strict hit anywhere beats a relaxed hit found earlier. */
+      if (res.strict) { hit = res.strict; break; }
+      if (res.relaxed) {
+        if (!relaxedHit) relaxedHit = res.relaxed;
+        /* Exact title plus a sub-second duration match is strong enough to stop
+         * early; scanning the remaining storefronts would only cost requests. */
+        if (relaxedHit.exact && song.duration > 0 &&
+            Math.abs(relaxedHit.duration - song.duration) <= 500) {
+          hit = relaxedHit;
+          break;
+        }
       }
     }
+    if (!hit && relaxedHit) {
+      hit = relaxedHit;
+      lrLog("debug", "[apple] relaxed match accepted (title+duration, artist not required)");
+    }
+    if (hit) lrItunesCacheSet(song, hit);
   }
   if (!hit) {
     lrLog("debug", "[apple] no iTunes match; elapsed=" + (lrNow() - tStart) + "ms");
@@ -659,7 +726,7 @@ function lrEngineApple(state, song, mode, dl) {
     lrLog("debug", "[apple] TTML rejected (" + probe.reason + ")");
     return [];
   }
-  if (!lrAppleIdentityOk(song, hit, mode)) {
+  if (!lrAppleIdentityOk(song, hit, mode, hit.relaxed)) {
     lrLog("debug", "[apple] identity/version gate rejected id=" + hit.appleId);
     return [];
   }
@@ -695,7 +762,7 @@ function lrRankHits(hits, song, mode) {
     var isrc = lrIsrc(h.isrc);
     if (!isrc || visited[isrc]) continue;
     var ht = lrString(h.title || ""), ha = lrString(h.artist || "");
-    if (!ht || !ha || !titleCore || lrTitleCore(ht) !== titleCore) continue;
+    if (!ht || !ha || !titleCore || !lrTitleMatch(song.title, ht)) continue;
     if (lrAssessVersion(song.title, song.album, ht, lrString(h.album)) === "conflict") continue;
     if (song.artist && !lrArtistCompatible(song.artist, ha)) continue;
     var dur = Number(h.duration || 0) * 1000;
@@ -717,10 +784,12 @@ function lrRankHits(hits, song, mode) {
 }
 function lrValidateIdentity(song, meta, mode) {
   if (!meta || !meta.title || !meta.artist) return false;
-  if (!song.title || !song.artist) return false;
-  if (lrTitleCore(song.title) !== lrTitleCore(meta.title)) return false;
+  if (!song.title) return false;
+  if (!lrTitleMatch(song.title, meta.title)) return false;
   if (lrAssessVersion(song.title, song.album, meta.title, lrString(meta.album)) === "conflict") return false;
-  if (!lrArtistCompatible(song.artist, meta.artist)) return false;
+  /* An empty local artist (untagged file) must not veto the candidate; the
+   * duration gate still has to hold. */
+  if (song.artist && !lrArtistCompatible(song.artist, meta.artist)) return false;
   var dur = Number(meta.duration || 0) * 1000;
   if (!isFinite(dur) || dur < 0) dur = 0;
   if (song.duration && dur && Math.abs(song.duration - dur) > (mode === "strict" ? 3000 : 5000)) return false;
@@ -859,7 +928,7 @@ function lrTryRanks(state, ranks, song, mode, output, seen, maxOut, dl) {
 }
 function lrEngineLrcRed(state, song, mode, fallback, maxOut, dl) {
   var out = [], seen = {};
-  if (!song.title || !song.artist) return out;
+  if (!song.title) return out;
   if (dl - lrNow() < 400) return out;
 
   if (song.isrc) {
@@ -868,14 +937,15 @@ function lrEngineLrcRed(state, song, mode, fallback, maxOut, dl) {
     seen[song.isrc] = true;
   }
   if (out.length < maxOut && dl - lrNow() > 400) {
-    var params = "track=" + encodeURIComponent(song.title) + "&artist=" + encodeURIComponent(song.artist);
+    var params = "track=" + encodeURIComponent(song.title);
+    if (song.artist) params += "&artist=" + encodeURIComponent(song.artist);
     if (song.album) params += "&album=" + encodeURIComponent(song.album);
     if (song.duration > 0) params += "&duration=" + Math.round(song.duration / 1000);
     lrTryRanks(state, lrFindCandidates(state, song, mode, LR_BASE + "/match.json?" + params, dl),
       song, mode, out, seen, maxOut, dl);
   }
   if (out.length < maxOut && fallback && dl - lrNow() > 400) {
-    var q = encodeURIComponent(song.title + " " + song.artist);
+    var q = encodeURIComponent((song.title + " " + song.artist).trim());
     lrTryRanks(state, lrFindCandidates(state, song, mode, LR_BASE + "/search.json?q=" + q, dl),
       song, mode, out, seen, maxOut, dl);
   }
@@ -886,8 +956,8 @@ function lrEngineLrcRed(state, song, mode, fallback, maxOut, dl) {
 function getLyrics(request) {
   var email = lrContact(request);
   var song = lrSongContext(request);
-  if (!song.title || !song.artist) {
-    lrLog("warn", "Song requires title and artist");
+  if (!song.title) {
+    lrLog("warn", "Song requires a title");
     return [];
   }
   if (typeof Platform === "undefined" || !Platform.http || typeof Platform.http.get !== "function" ||
